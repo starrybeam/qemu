@@ -306,6 +306,7 @@ trace_backends="nop"
 trace_file="trace"
 spice=""
 rbd=""
+ybd=""
 smartcard_nss=""
 libusb=""
 usb_redir=""
@@ -1035,6 +1036,10 @@ for opt do
   ;;
   --enable-rbd) rbd="yes"
   ;;
+  --disable-ybd) ybd="no"
+  ;;
+  --enable-ybd) ybd="yes"
+  ;;
   --disable-xfsctl) xfs="no"
   ;;
   --enable-xfsctl) xfs="yes"
@@ -1367,6 +1372,7 @@ Advanced options (experts only):
   --disable-spice          disable spice
   --enable-spice           enable spice
   --enable-rbd             enable building the rados block device (rbd)
+  --enable-ybd             enable building the rados block device (ybd)
   --disable-libiscsi       disable iscsi support
   --enable-libiscsi        enable iscsi support
   --disable-libnfs         disable nfs support
@@ -2924,6 +2930,26 @@ EOF
 fi
 
 ##########################################
+# ybd probe
+if test "$ybd" != "no" ; then
+  cat > $TMPC <<EOF
+#include <stdio.h>
+int main(void) {
+    return 0;
+}
+EOF
+  ybd_libs=""
+  if compile_prog "" "$ybd_libs" ; then
+    ybd=yes
+  else
+    if test "$ybd" = "yes" ; then
+      feature_not_found "yeestor block device" "Install yeestor devel"
+    fi
+    ybd=no
+  fi
+fi
+
+##########################################
 # libssh2 probe
 min_libssh2_version=1.2.8
 if test "$libssh2" != "no" ; then
@@ -4386,6 +4412,7 @@ else
 echo "spice support     $spice"
 fi
 echo "rbd support       $rbd"
+echo "ybd support       $ybd"
 echo "xfsctl support    $xfs"
 echo "nss used          $smartcard_nss"
 echo "libusb            $libusb"
@@ -4803,6 +4830,11 @@ if test "$rbd" = "yes" ; then
   echo "CONFIG_RBD=m" >> $config_host_mak
   echo "RBD_CFLAGS=$rbd_cflags" >> $config_host_mak
   echo "RBD_LIBS=$rbd_libs" >> $config_host_mak
+fi
+
+if test "$ybd" = "yes" ; then
+  echo "CONFIG_YBD=m" >> $config_host_mak
+  echo "YBD_LIBS=$ybd_libs" >> $config_host_mak
 fi
 
 echo "CONFIG_COROUTINE_BACKEND=$coroutine" >> $config_host_mak
