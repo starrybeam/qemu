@@ -2938,7 +2938,7 @@ int main(void) {
     return 0;
 }
 EOF
-  ybd_libs=""
+  ybd_libs="-L/home/xjl/YeeSAN/build/lib  -lYfsCommon -lybd "
   if compile_prog "" "$ybd_libs" ; then
     ybd=yes
   else
@@ -4834,6 +4834,7 @@ fi
 
 if test "$ybd" = "yes" ; then
   echo "CONFIG_YBD=m" >> $config_host_mak
+  echo "YBD_CFLAGS=$ybd_cflags" >> $config_host_mak
   echo "YBD_LIBS=$ybd_libs" >> $config_host_mak
 fi
 

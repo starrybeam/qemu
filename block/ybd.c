@@ -523,7 +523,6 @@ static int qemu_yfs_create(const char *filename,
         } else {
             ret = -errno;
         }
-
         if (yfs_close(fd) != 0) {
             ret = -errno;
         }
@@ -576,7 +575,6 @@ static int qemu_yfs_truncate(BlockDriverState *bs, int64_t offset)
 {
     int ret;
     BDRVYfsState *s = bs->opaque;
-
     ret = yfs_ftruncate(s->fd, offset);
     if (ret < 0) {
         return -errno;
@@ -655,13 +653,14 @@ out:
 static int64_t qemu_yfs_getlength(BlockDriverState *bs)
 {
     BDRVYfsState *s = bs->opaque;
+    struct stat st;
     int64_t ret;
 
-    ret = yfs_lseek(s->fd, 0, SEEK_END);
+    ret = yfs_fstat(s->fd, &st);
     if (ret < 0) {
         return -errno;
     } else {
-        return ret;
+        return st.st_size;
     }
 }
 
