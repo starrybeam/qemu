@@ -25,9 +25,14 @@ typedef struct BDRVYfsState {
 } BDRVYfsState;
 
 typedef struct YfsConf {
-    char *server;
-    int port;
-    char *volname;
+    char *uuid;
+    char *localaddr;
+    char *localport;
+    char *monaddrs;
+    char *user;
+    char *sexport;
+    char *mnt;
+    char *pool;
     char *image;
     char *transport;
 } YfsConf;
@@ -35,8 +40,14 @@ typedef struct YfsConf {
 static void qemu_yfs_gconf_free(YfsConf *gconf)
 {
     if (gconf) {
-        g_free(gconf->server);
-        g_free(gconf->volname);
+        g_free(gconf->uuid);
+        g_free(gconf->localaddr);
+        g_free(gconf->localport);
+        g_free(gconf->monaddrs);
+        g_free(gconf->user);
+        g_free(gconf->sexport);
+        g_free(gconf->mnt);
+        g_free(gconf->pool);
         g_free(gconf->image);
         g_free(gconf->transport);
         g_free(gconf);
@@ -57,7 +68,7 @@ static int parse_volume_options(YfsConf *gconf, char *path)
     if (*p == '\0') {
         return -EINVAL;
     }
-    gconf->volname = g_strndup(q, p - q);
+    gconf->pool = g_strndup(q, p - q);
 
     /* image */
     p += strspn(p, "/");
@@ -143,20 +154,6 @@ static int qemu_yfs_parseuri(YfsConf *gconf, const char *filename)
         goto out;
     }
 
-    if (is_unix) {
-        if (uri->server || uri->port) {
-            ret = -EINVAL;
-            goto out;
-        }
-        if (strcmp(qp->p[0].name, "socket")) {
-            ret = -EINVAL;
-            goto out;
-        }
-        gconf->server = g_strdup(qp->p[0].value);
-    } else {
-        gconf->server = g_strdup(uri->server ? uri->server : "localhost");
-        gconf->port = uri->port;
-    }
 
 out:
     if (qp) {
@@ -181,13 +178,13 @@ static struct yfs *qemu_yfs_init(YfsConf *gconf, const char *filename,
         goto out;
     }
 
-    yfs = yfs_new(gconf->volname);
+    yfs = yfs_new();
     if (!yfs) {
         goto out;
     }
 
-    ret = yfs_set_volfile_server(yfs, gconf->transport, gconf->server,
-            gconf->port);
+    ret = yfs_set_volfile_server(yfs, gconf->uuid, gconf->localaddr, gconf->localport, 
+            gconf->monaddrs, gconf->user, gconf->sexport, gconf->mnt, gconf->transport);
     if (ret < 0) {
         goto out;
     }
@@ -196,7 +193,7 @@ static struct yfs *qemu_yfs_init(YfsConf *gconf, const char *filename,
      * TODO: Use GF_LOG_ERROR instead of hard code value of 4 here when
      * YfsFS makes GF_LOG_* macros available to libgfapi users.
      */
-    ret = yfs_set_logging(yfs, "-", 4);
+    ret = yfs_set_logging(yfs, 4);
     if (ret < 0) {
         goto out;
     }
@@ -204,9 +201,9 @@ static struct yfs *qemu_yfs_init(YfsConf *gconf, const char *filename,
     ret = yfs_init(yfs);
     if (ret) {
         error_setg_errno(errp, errno,
-                         "Yfs connection failed for server=%s port=%d "
-                         "volume=%s image=%s transport=%s", gconf->server,
-                         gconf->port, gconf->volname, gconf->image,
+                         "Yfs connection failed for localaddr=%s port=%s "
+                         "pool=%s image=%s transport=%s", gconf->localaddr,
+                         gconf->localport, gconf->pool, gconf->image,
                          gconf->transport);
 
         /* yfs_init sometimes doesn't set errno although docs suggest that */
@@ -295,6 +292,8 @@ static int qemu_yfs_open(BlockDriverState *bs,  QDict *options,
     QemuOpts *opts;
     Error *local_err = NULL;
     const char *filename;
+    char path[4096];
+    memset(path, 0, 4096);
 
     opts = qemu_opts_create(&runtime_opts, NULL, 0, &error_abort);
     qemu_opts_absorb_qdict(opts, options, &local_err);
@@ -314,7 +313,8 @@ static int qemu_yfs_open(BlockDriverState *bs,  QDict *options,
 
     qemu_yfs_parse_flags(bdrv_flags, &open_flags);
 
-    s->fd = yfs_open(s->yfs, gconf->image, open_flags);
+    sprintf(path, "/%s/%s", gconf->pool, gconf->image);
+    s->fd = yfs_open(s->yfs, path, open_flags);
     if (!s->fd) {
         ret = -errno;
     }
@@ -347,6 +347,8 @@ static int qemu_yfs_reopen_prepare(BDRVReopenState *state,
     BDRVYfsReopenState *reop_s;
     YfsConf *gconf = NULL;
     int open_flags = 0;
+    char path[4096];
+    memset(path, 0, 4096);
 
     assert(state != NULL);
     assert(state->bs != NULL);
@@ -363,8 +365,8 @@ static int qemu_yfs_reopen_prepare(BDRVReopenState *state,
         ret = -errno;
         goto exit;
     }
-
-    reop_s->fd = yfs_open(reop_s->yfs, gconf->image, open_flags);
+    sprintf(path, "/%s/%s", gconf->pool, gconf->image);
+    reop_s->fd = yfs_open(reop_s->yfs, path, open_flags);
     if (reop_s->fd == NULL) {
         /* reops->yfs will be cleaned up in _abort */
         ret = -errno;
@@ -487,6 +489,8 @@ static int qemu_yfs_create(const char *filename,
     int64_t total_size = 0;
     char *tmp = NULL;
     YfsConf *gconf = g_new0(YfsConf, 1);
+    char path[4096];
+    memset(path, 0, 4096);
 
     yfs = qemu_yfs_init(gconf, filename, errp);
     if (!yfs) {
@@ -511,8 +515,9 @@ static int qemu_yfs_create(const char *filename,
         goto out;
     }
 
-    fd = yfs_creat(yfs, gconf->image,
-        O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, S_IRUSR | S_IWUSR);
+    sprintf(path, "/%s/%s", gconf->pool, gconf->image);
+    fd = yfs_creat(yfs, path,
+        O_CREAT | O_TRUNC | O_BINARY | O_RDWR | O_ACCMODE, S_IRUSR | S_IWUSR);
     if (!fd) {
         ret = -errno;
     } else {

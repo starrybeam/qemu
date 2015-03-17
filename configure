@@ -2938,7 +2938,7 @@ int main(void) {
     return 0;
 }
 EOF
-  ybd_libs="-L/home/xjl/YeeSAN/build/lib  -lYfsCommon -lybd "
+  ybd_libs="-L/home/xjl/YeeSAN/test/lib -lybd"
   if compile_prog "" "$ybd_libs" ; then
     ybd=yes
   else

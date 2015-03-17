@@ -19,14 +19,19 @@ struct yfs;
 struct yfs_fd;
 
 
-struct yfs* yfs_new(const char* volname);
+struct yfs* yfs_new(void);
 
 int yfs_set_volfile_server(struct yfs* yfs, 
-        const char* transport, 
-        const char* server,
-        int port);
+        const char* uuid,
+        const char* localaddr,
+        const char* localport,
+        const char* monaddrs,
+        const char* user,
+        const char* sexport,
+        const char* mmt,
+        const char* transport);
 
-int yfs_set_logging(struct yfs* yfs, const char* op, unsigned short level);
+int yfs_set_logging(struct yfs* yfs, unsigned short level);
 
 
 int yfs_init(struct yfs* yfs);
