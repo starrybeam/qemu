@@ -9,7 +9,17 @@
  */
 #include "block/block_int.h"
 #include "qemu/uri.h"
+#include "qemu/option_int.h"
 #include "ybd.h"
+
+#define YBD_OPT_CMD "cmd"
+#define YBD_OPT_IMG "img"
+#define YBD_OPT_TRG "trg"
+#define YBD_OPT_SNP "snap"
+
+#define YBD_CMD_DEL "del"
+#define YBD_CMD_CLONE "clone"
+#define YBD_ROOT "yfs:/root/root"
 
 typedef struct YfsAIOCB {
     int64_t size;
@@ -22,6 +32,7 @@ typedef struct YfsAIOCB {
 typedef struct BDRVYfsState {
     struct yfs *yfs;
     struct yfs_fd *fd;
+    bool isroot;
 } BDRVYfsState;
 
 typedef struct YfsConf {
@@ -305,6 +316,7 @@ static int qemu_yfs_open(BlockDriverState *bs,  QDict *options,
 
     filename = qemu_opt_get(opts, "filename");
 
+
     s->yfs = qemu_yfs_init(gconf, filename, errp);
     if (!s->yfs) {
         ret = -errno;
@@ -312,6 +324,12 @@ static int qemu_yfs_open(BlockDriverState *bs,  QDict *options,
     }
 
     qemu_yfs_parse_flags(bdrv_flags, &open_flags);
+
+    if (!strcmp(filename, YBD_ROOT)) {
+        s->isroot = true;
+        goto out;
+        
+    }
 
     sprintf(path, "/%s/%s", gconf->pool, gconf->image);
     s->fd = yfs_open(s->yfs, path, open_flags);
@@ -365,6 +383,12 @@ static int qemu_yfs_reopen_prepare(BDRVReopenState *state,
         ret = -errno;
         goto exit;
     }
+
+    if (!strcmp(state->bs->filename, YBD_ROOT)) {
+        ret = 0;
+        goto exit;
+    }
+
     sprintf(path, "/%s/%s", gconf->pool, gconf->image);
     reop_s->fd = yfs_open(reop_s->yfs, path, open_flags);
     if (reop_s->fd == NULL) {
@@ -482,7 +506,7 @@ static inline int qemu_yfs_zerofill(struct yfs_fd *fd, int64_t offset,
 static int qemu_yfs_create(const char *filename,
                                QemuOpts *opts, Error **errp)
 {
-    struct yfs *yfs;
+    struct yfs *yfs = NULL;
     struct yfs_fd *fd;
     int ret = 0;
     int prealloc = 0;
@@ -491,6 +515,11 @@ static int qemu_yfs_create(const char *filename,
     YfsConf *gconf = g_new0(YfsConf, 1);
     char path[4096];
     memset(path, 0, 4096);
+
+    if (!strcmp(filename, YBD_ROOT)) {
+        ret = -EEXIST;
+        goto out;
+    }
 
     yfs = qemu_yfs_init(gconf, filename, errp);
     if (!yfs) {
@@ -533,7 +562,9 @@ static int qemu_yfs_create(const char *filename,
         }
     }
 out:
-    g_free(tmp);
+    if (tmp) {
+        g_free(tmp);
+    }
     qemu_yfs_gconf_free(gconf);
     if (yfs) {
         yfs_fini(yfs);
@@ -549,6 +580,11 @@ static coroutine_fn int qemu_yfs_co_rw(BlockDriverState *bs,
     BDRVYfsState *s = bs->opaque;
     size_t size = nb_sectors * BDRV_SECTOR_SIZE;
     off_t offset = sector_num * BDRV_SECTOR_SIZE;
+
+    if (s->isroot) {
+        ret = -EPERM;
+        goto out;
+    }
 
     acb->size = size;
     acb->ret = 0;
@@ -580,6 +616,9 @@ static int qemu_yfs_truncate(BlockDriverState *bs, int64_t offset)
 {
     int ret;
     BDRVYfsState *s = bs->opaque;
+    if (s->isroot) {
+        return -EPERM;
+    }
     ret = yfs_ftruncate(s->fd, offset);
     if (ret < 0) {
         return -errno;
@@ -606,6 +645,10 @@ static coroutine_fn int qemu_yfs_co_flush_to_disk(BlockDriverState *bs)
     YfsAIOCB *acb = g_slice_new(YfsAIOCB);
     BDRVYfsState *s = bs->opaque;
 
+    if (s->isroot) {
+        ret = -EPERM;
+        goto out;
+    }
     acb->size = 0;
     acb->ret = 0;
     acb->coroutine = qemu_coroutine_self();
@@ -661,6 +704,10 @@ static int64_t qemu_yfs_getlength(BlockDriverState *bs)
     struct stat st;
     int64_t ret;
 
+    if (s->isroot) {
+        return 0;
+    }
+
     ret = yfs_fstat(s->fd, &st);
     if (ret < 0) {
         return -errno;
@@ -675,6 +722,9 @@ static int64_t qemu_yfs_allocated_file_size(BlockDriverState *bs)
     struct stat st;
     int ret;
 
+    if (s->isroot) {
+        return -EPERM;
+    }
     ret = yfs_fstat(s->fd, &st);
     if (ret < 0) {
         return -errno;
@@ -714,9 +764,205 @@ static QemuOptsList qemu_yfs_create_opts = {
             .type = QEMU_OPT_STRING,
             .help = "Preallocation mode (allowed values: off, full)"
         },
+
+        {
+            .name = YBD_OPT_CMD,
+            .type = QEMU_OPT_STRING,
+            .help = "manager cmd (allowed valued: clone delete)"
+
+        },
+
+        {
+            .name = YBD_OPT_IMG,
+            .type = QEMU_OPT_STRING,
+            .help = "to delete which img"
+        },
+
+        {
+            .name =  YBD_OPT_TRG,
+            .type = QEMU_OPT_STRING,
+            .help = "clone to target file"
+        },
+
+        {
+            .name = YBD_OPT_SNP,
+            .type = QEMU_OPT_STRING,
+            .help = "clone img snap "
+
+        },
         { /* end of list */ }
     }
 };
+
+
+static int qemu_yfs_snap_create(BlockDriverState *bs,
+                                        QEMUSnapshotInfo *sn_info)
+{
+    BDRVYfsState *s = bs->opaque;
+    int r;
+
+    if (s->isroot) {
+        return -EPERM;
+    }
+    if (sn_info->name[0] == '\0') {
+        return -EINVAL; /* we need a name for rbd snapshots */
+    }
+
+    if (sn_info->id_str[0] != '\0' &&
+            strcmp(sn_info->id_str, sn_info->name) != 0) {
+        return -EINVAL;
+    }
+
+
+    r = yfs_snap_create(s->fd, sn_info->name);
+    if (r < 0) {
+        error_report("failed to create snap: %s", strerror(-r));
+        return r;
+    }
+
+    return 0;
+}
+
+static int qemu_yfs_snap_remove(BlockDriverState *bs,const char *snapshot_id,
+        const char *snapshot_name,Error **errp)
+{
+    BDRVYfsState *s = bs->opaque;
+    int r;
+
+    if(s->isroot) {
+        return -EPERM;
+    }
+    if (!snapshot_name) {
+        error_setg(errp, "yfs need a valid snapshot name");
+        return -EINVAL;
+    }
+
+    /* If snapshot_id is specified, it must be equal to name, see
+     *        qemu_rbd_snap_list() */
+    if (snapshot_id && strcmp(snapshot_id, snapshot_name)) {
+        error_setg(errp,
+                "ybd do not support snapshot id, it should be NULL or "
+                "equal to snapshot name");
+        return -EINVAL;
+    }
+
+    r = yfs_snap_remove(s->fd, snapshot_name);
+    if (r < 0) {
+        error_setg_errno(errp, -r, "Failed to remove the snapshot");
+    }
+    return r;
+}
+
+static int qemu_yfs_snap_rollback(BlockDriverState *bs, const char *snapshot_name)
+{
+    BDRVYfsState *s = bs->opaque;
+    int r;
+    if (s->isroot) {
+        return -EPERM;
+    }
+
+    r = yfs_snap_rollback(s->fd, snapshot_name);
+    return r;
+}
+
+
+static int qemu_yfs_snap_list(BlockDriverState *bs, 
+        QEMUSnapshotInfo **psn_tab)
+{
+    BDRVYfsState *s = bs->opaque;
+    QEMUSnapshotInfo *sn_info, *sn_tab = NULL;
+    int i, snap_count;
+    struct yfs_snap_info_t *snaps;
+    int max_snaps = YBD_MAX_SNAPS;
+
+    if (s->isroot) {
+        return -EPERM;
+    }
+    do {
+        snaps = g_new(struct yfs_snap_info_t, max_snaps);
+        snap_count = yfs_snap_list(s->fd, snaps, &max_snaps);
+        if (snap_count <= 0) {
+            g_free(snaps);
+        }
+    } while (snap_count == -ERANGE);
+
+    if (snap_count <= 0) {
+        goto done;
+    }
+
+    sn_tab = g_new0(QEMUSnapshotInfo, snap_count);
+
+    for (i = 0; i < snap_count; i++) {
+        const char *snap_name = snaps[i].name;
+
+        sn_info = sn_tab + i;
+        pstrcpy(sn_info->id_str, sizeof(sn_info->id_str), snap_name);
+        pstrcpy(sn_info->name, sizeof(sn_info->name), snap_name);
+
+        sn_info->vm_state_size = snaps[i].vm_state_size;
+        sn_info->date_sec = (uint32_t)snaps[i].vm_clock_nsec;
+        sn_info->date_nsec = 0;
+        sn_info->vm_clock_nsec = 0;
+    }
+    g_free(snaps);
+
+done:
+    *psn_tab = sn_tab;
+    return snap_count;
+}
+
+static int qemu_yfs_amend_options(BlockDriverState *bs, QemuOpts *opts,
+        BlockDriverAmendStatusCB *status_cb)
+{
+    BDRVYfsState *s = bs->opaque;
+    if (!s->isroot) {
+        printf("only yfs:/root/root can do this opertion");
+        return -EPERM;
+    }
+    QemuOptDesc *desc = opts->list->desc;
+
+    while (desc && desc->name) {
+        if (!qemu_opt_find(opts, desc->name)) {
+            /* only change explicitly defined options */
+            desc++;
+            continue;
+        }
+
+        if (!strcmp(desc->name, YBD_OPT_CMD)) {
+            const char* cmd = qemu_opt_get(opts, YBD_OPT_CMD);
+            if (!cmd) {
+                /* preserve default */
+            } if (!strcmp(cmd, YBD_CMD_DEL)) {
+                const char *img = qemu_opt_get(opts, YBD_OPT_IMG);
+                if (!img) {
+                    printf("del img filename is need\n");
+                    return -EINVAL; 
+                } else {
+                    return yfs_remove(s->yfs, img);
+                }
+            } else if (!strcmp(cmd, YBD_CMD_CLONE)){
+                const char *img = qemu_opt_get(opts, YBD_OPT_IMG);
+                const char *snp = qemu_opt_get(opts, YBD_OPT_SNP);
+                const char *trg = qemu_opt_get(opts, YBD_OPT_TRG);
+                if (!img || !trg) {
+                    printf("clone img filename and target filename is need\n");
+                    return -EINVAL;
+                }
+
+                return yfs_clone(s->yfs, img, snp, trg);
+
+            } else {
+                return -EINVAL;
+            }
+        } 
+
+
+        desc++;
+    }
+
+   
+    return -ENOTSUP;
+}
 
 static BlockDriver bdrv_yfs = {
     .format_name                  = "yfs",
@@ -743,6 +989,11 @@ static BlockDriver bdrv_yfs = {
     .bdrv_co_write_zeroes         = qemu_yfs_co_write_zeroes,
 #endif
     .create_opts                  = &qemu_yfs_create_opts,
+    .bdrv_snapshot_create   = qemu_yfs_snap_create,
+    .bdrv_snapshot_delete   = qemu_yfs_snap_remove,
+    .bdrv_snapshot_list     = qemu_yfs_snap_list,
+    .bdrv_snapshot_goto     = qemu_yfs_snap_rollback,
+    .bdrv_amend_options     = qemu_yfs_amend_options,
 };
 
 static BlockDriver bdrv_yfs_tcp = {

@@ -13,6 +13,7 @@ extern "C"{
 #include <sys/cdefs.h>
 #include <dirent.h>
 #include <sys/statvfs.h>
+#include <stdint.h>
 
 
 struct yfs;
@@ -59,6 +60,8 @@ struct yfs_fd* yfs_creat(struct yfs* yfs,
         int flags,
         unsigned short mode);
 
+int yfs_remove(struct yfs* yfs, const char* image);
+
 
 int yfs_ftruncate(struct yfs_fd* yfs, int64_t total_size);
 
@@ -97,6 +100,29 @@ off_t yfs_lseek(struct yfs_fd* fd, off_t offset, int whence);
 
 int yfs_fstat(struct yfs_fd* fd, struct stat *st);
 
+struct yfs_snap_info_t
+{
+    char id_str[128]; /* unique snapshot id */
+    /* the following fields are informative. They are not needed for
+     *        the consistency of the snapshot */
+    char name[256]; /* user chosen name */
+    uint64_t vm_state_size; /* VM state info size */
+    uint32_t date_sec; /* UTC date of the snapshot */
+    uint32_t date_nsec;
+    uint64_t vm_clock_nsec; /* VM clock relative to boot */
+};
+
+const int YBD_MAX_SNAPS = 1000;
+
+int yfs_snap_create(struct yfs_fd* fd, const char* snapname);
+
+int yfs_snap_remove(struct yfs_fd* fd, const char* snapname);
+
+int yfs_snap_rollback(struct yfs_fd* fd, const char* snapname);
+
+int yfs_snap_list(struct yfs_fd* fd, struct yfs_snap_info_t *list, int *maxcount);
+
+int yfs_clone(struct yfs* yfs, const char* img, const char* snap, const char* trg);
 #ifdef __cplusplus
 }
 #endif
