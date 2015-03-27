@@ -952,6 +952,7 @@ static int qemu_yfs_amend_options(BlockDriverState *bs, QemuOpts *opts,
                 return yfs_clone(s->yfs, img, snp, trg);
 
             } else {
+                printf("invalid argument:%s", cmd);
                 return -EINVAL;
             }
         } 
