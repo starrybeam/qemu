@@ -7,6 +7,9 @@
  * See the COPYING file in the top-level directory.
  *
  */
+
+#include <sys/vfs.h> 
+
 #include "block/block_int.h"
 #include "qemu/uri.h"
 #include "qemu/option_int.h"
@@ -16,10 +19,12 @@
 #define YBD_OPT_IMG "img"
 #define YBD_OPT_TRG "trg"
 #define YBD_OPT_SNP "snap"
+#define YBD_OPT_POOL "pool"
 
 #define YBD_CMD_DEL "del"
 #define YBD_CMD_CLONE "clone"
-#define YBD_ROOT "yfs:/root/root"
+#define YBD_CMD_STATFS "statfs"
+#define YBD_ROOT "gluster://127.0.0.1/root/root"
 
 #define PROTOCOL "gluster"
 
@@ -792,6 +797,12 @@ static QemuOptsList qemu_yfs_create_opts = {
             .help = "clone img snap "
 
         },
+
+        {
+            .name = YBD_OPT_POOL,
+            .type = QEMU_OPT_STRING,
+            .help = "statfs pool"
+        },
         { /* end of list */ }
     }
 };
@@ -953,6 +964,28 @@ static int qemu_yfs_amend_options(BlockDriverState *bs, QemuOpts *opts,
 
                 return yfs_clone(s->yfs, img, snp, trg);
 
+            } else if (!strcmp(cmd, YBD_CMD_STATFS)) { 
+                const char *pool = qemu_opt_get(opts, YBD_OPT_POOL);
+                struct statfs st;
+                int ret = 0;
+                if (!pool) {
+                    printf("pool name is need.\n");
+                    return -EINVAL;
+                }
+
+                ret = yfs_statfs(s->yfs, pool, &st);
+                if (ret == 0) {
+                    printf("f_type:%lu\n",st.f_type);
+                    printf("f_bsize:%lu\n",st.f_bsize);
+                    printf("f_blocks:%lu\n", st.f_blocks);
+                    printf("f_bfree:%lu\n", st.f_bfree);
+                    printf("f_bavail:%lu\n", st.f_bavail);
+                    printf("f_files:%lu\n", st.f_files);
+                    printf("f_ffree:%lu\n", st.f_ffree);
+                    printf("f_namelen:%lu\n", st.f_namelen);
+                    printf("f_frsize:%lu\n", st.f_frsize);
+                }
+                return ret;
             } else {
                 printf("invalid argument:%s", cmd);
                 return -EINVAL;

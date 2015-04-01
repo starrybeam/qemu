@@ -18,7 +18,7 @@ extern "C"{
 
 struct yfs;
 struct yfs_fd;
-
+struct statfs; 
 
 struct yfs* yfs_new(void);
 
@@ -123,6 +123,8 @@ int yfs_snap_rollback(struct yfs_fd* fd, const char* snapname);
 int yfs_snap_list(struct yfs_fd* fd, struct yfs_snap_info_t *list, int *maxcount);
 
 int yfs_clone(struct yfs* yfs, const char* img, const char* snap, const char* trg);
+
+int yfs_statfs(struct yfs* yfs, const char* pool, struct statfs *buf);
 #ifdef __cplusplus
 }
 #endif
