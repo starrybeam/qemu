@@ -21,6 +21,8 @@
 #define YBD_CMD_CLONE "clone"
 #define YBD_ROOT "yfs:/root/root"
 
+#define PROTOCOL "gluster"
+
 typedef struct YfsAIOCB {
     int64_t size;
     int ret;
@@ -140,14 +142,14 @@ static int qemu_yfs_parseuri(YfsConf *gconf, const char *filename)
     }
 
     /* transport */
-    if (!uri->scheme || !strcmp(uri->scheme, "yfs")) {
+    if (!uri->scheme || !strcmp(uri->scheme, "gluster")) {
         gconf->transport = g_strdup("tcp");
-    } else if (!strcmp(uri->scheme, "yfs+tcp")) {
+    } else if (!strcmp(uri->scheme, "gluster+tcp")) {
         gconf->transport = g_strdup("tcp");
-    } else if (!strcmp(uri->scheme, "yfs+unix")) {
+    } else if (!strcmp(uri->scheme, "gluster+unix")) {
         gconf->transport = g_strdup("unix");
         is_unix = true;
-    } else if (!strcmp(uri->scheme, "yfs+rdma")) {
+    } else if (!strcmp(uri->scheme, "gluster+rdma")) {
         gconf->transport = g_strdup("rdma");
     } else {
         ret = -EINVAL;
@@ -183,7 +185,7 @@ static struct yfs *qemu_yfs_init(YfsConf *gconf, const char *filename,
 
     ret = qemu_yfs_parseuri(gconf, filename);
     if (ret < 0) {
-        error_setg(errp, "Usage: file=yfs[+transport]://[server[:port]]/"
+        error_setg(errp, "Usage: file=gluster[+transport]://[server[:port]]/"
                    "volname/image[?socket=...]");
         errno = -ret;
         goto out;
@@ -264,7 +266,7 @@ static void yfs_finish_aiocb(struct yfs_fd *fd, ssize_t ret, void *arg)
 
 /* TODO Convert to fine grained options */
 static QemuOptsList runtime_opts = {
-    .name = "yfs",
+    .name = "gluster",
     .head = QTAILQ_HEAD_INITIALIZER(runtime_opts.head),
     .desc = {
         {
@@ -751,7 +753,7 @@ static int qemu_yfs_has_zero_init(BlockDriverState *bs)
 }
 
 static QemuOptsList qemu_yfs_create_opts = {
-    .name = "qemu-yfs-create-opts",
+    .name = "qemu-gluster-create-opts",
     .head = QTAILQ_HEAD_INITIALIZER(qemu_yfs_create_opts.head),
     .desc = {
         {
@@ -916,7 +918,7 @@ static int qemu_yfs_amend_options(BlockDriverState *bs, QemuOpts *opts,
 {
     BDRVYfsState *s = bs->opaque;
     if (!s->isroot) {
-        printf("only yfs:/root/root can do this opertion");
+        printf("only gluster:/root/root can do this opertion");
         return -EPERM;
     }
     QemuOptDesc *desc = opts->list->desc;
@@ -966,8 +968,8 @@ static int qemu_yfs_amend_options(BlockDriverState *bs, QemuOpts *opts,
 }
 
 static BlockDriver bdrv_yfs = {
-    .format_name                  = "yfs",
-    .protocol_name                = "yfs",
+    .format_name                  = "gluster",
+    .protocol_name                = "gluster",
     .instance_size                = sizeof(BDRVYfsState),
     .bdrv_needs_filename          = true,
     .bdrv_file_open               = qemu_yfs_open,
@@ -998,8 +1000,8 @@ static BlockDriver bdrv_yfs = {
 };
 
 static BlockDriver bdrv_yfs_tcp = {
-    .format_name                  = "yfs",
-    .protocol_name                = "yfs+tcp",
+    .format_name                  = "gluster",
+    .protocol_name                = "gluster+tcp",
     .instance_size                = sizeof(BDRVYfsState),
     .bdrv_needs_filename          = true,
     .bdrv_file_open               = qemu_yfs_open,
@@ -1025,8 +1027,8 @@ static BlockDriver bdrv_yfs_tcp = {
 };
 
 static BlockDriver bdrv_yfs_unix = {
-    .format_name                  = "yfs",
-    .protocol_name                = "yfs+unix",
+    .format_name                  = "gluster",
+    .protocol_name                = "gluster+unix",
     .instance_size                = sizeof(BDRVYfsState),
     .bdrv_needs_filename          = true,
     .bdrv_file_open               = qemu_yfs_open,
@@ -1052,8 +1054,8 @@ static BlockDriver bdrv_yfs_unix = {
 };
 
 static BlockDriver bdrv_yfs_rdma = {
-    .format_name                  = "yfs",
-    .protocol_name                = "yfs+rdma",
+    .format_name                  = "gluster",
+    .protocol_name                = "gluster+rdma",
     .instance_size                = sizeof(BDRVYfsState),
     .bdrv_needs_filename          = true,
     .bdrv_file_open               = qemu_yfs_open,
