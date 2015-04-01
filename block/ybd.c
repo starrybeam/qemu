@@ -24,7 +24,7 @@
 #define YBD_CMD_DEL "del"
 #define YBD_CMD_CLONE "clone"
 #define YBD_CMD_STATFS "statfs"
-#define YBD_ROOT "gluster://127.0.0.1/root/root"
+#define YBD_ROOT "gluster:/root/root"
 
 #define PROTOCOL "gluster"
 
